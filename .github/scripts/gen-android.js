@@ -347,10 +347,11 @@ function installLauncherIcon() {
     console.warn('ANDROID_HOME not set at generate time — Gradle will use env on build.');
   }
 
-  // Use built-in debug signing for release so assembleRelease always produces
-  // an installable APK without a custom keystore. Workflow creates
-  // ~/.android/debug.keystore before the build. Optional release re-sign
-  // happens later via apksigner when KEYSTORE_BASE64 is set.
+  // Stable release keystore (PKCS12) is committed as release.keystore.b64 and
+  // decoded by the workflow before Gradle runs. Same cert every build so
+  // Android can update/overwrite previous installs (same package + signature).
+  // Fallback: debug signing if the keystore file is missing (first local gen).
+  const hasReleaseKs = fs.existsSync('release.keystore');
   writeText(
     'app/build.gradle',
     [
@@ -370,12 +371,29 @@ function installLauncherIcon() {
       '        versionName "' + versionName + '"',
       '    }',
       '',
+      '    signingConfigs {',
+      '        release {',
+      "            def ks = rootProject.file('release.keystore')",
+      '            if (ks.exists()) {',
+      '                storeFile ks',
+      "                storePassword 'MangaKuRelease2024'",
+      "                keyAlias 'manga-key'",
+      "                keyPassword 'MangaKuRelease2024'",
+      '            }',
+      '        }',
+      '    }',
+      '',
       '    buildTypes {',
       '        release {',
       '            minifyEnabled false',
       '            shrinkResources false',
       '            debuggable false',
-      '            signingConfig signingConfigs.debug',
+      '            // Prefer stable release keystore so updates install over old APKs.',
+      "            if (rootProject.file('release.keystore').exists()) {",
+      '                signingConfig signingConfigs.release',
+      '            } else {',
+      '                signingConfig signingConfigs.debug',
+      '            }',
       '        }',
       '    }',
       '',
@@ -400,6 +418,9 @@ function installLauncherIcon() {
       '}',
     ].join('\n'),
   );
+  if (!hasReleaseKs) {
+    console.warn('release.keystore missing — release build will use debug signing until workflow decodes release.keystore.b64');
+  }
 
   writeText(
     'app/proguard-rules.pro',
