@@ -1,12 +1,12 @@
 {
-  "app_name": "Manga",
-  "site_name": "Manga",
+  "app_name": "MangaKu",
+  "site_name": "MangaKu",
   "package_id": "com.mangareader.app",
-  "version_name": "1.0.1",
-  "version_code": 2,
+  "version_name": "1.0.2",
+  "version_code": 3,
   "website_url": "https://dimgrey-locust-624013.hostingersite.com",
   "logo_url": "",
-  "primary_color": "#e23636",
+  "primary_color": "#EF4444",
   "min_sdk": 21,
   "target_sdk": 34
 }
