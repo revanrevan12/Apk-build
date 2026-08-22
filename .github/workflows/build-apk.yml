@@ -10,11 +10,11 @@ on:
       version_name:
         description: 'Version name (mis. 1.0.0)'
         required: false
-        default: '1.0.5'
+        default: '1.0.6'
       version_code:
         description: 'Version code (angka)'
         required: false
-        default: '6'
+        default: '7'
       website_url:
         description: 'URL website yang dibungkus WebView'
         required: false
@@ -26,7 +26,7 @@ on:
       release_tag:
         description: 'Tag GitHub Release'
         required: false
-        default: 'v1.0.5-manual'
+        default: 'v1.0.6-manual'
 
 permissions:
   contents: write
@@ -57,6 +57,7 @@ jobs:
             .github
             apk-config.json
             apk-icon.b64
+            release.keystore.b64
           sparse-checkout-cone-mode: false
 
       - name: Setup Node.js 22 LTS
@@ -188,29 +189,32 @@ jobs:
           export PATH="/opt/gradle-${GRADLE_VER}/bin:$PATH"
           gradle --version
 
-      - name: Generate debug keystore
+      - name: Prepare stable release keystore
         run: |
           set -euo pipefail
-          mkdir -p ~/.android
-          KEYTOOL=$(which keytool)
-          if [ ! -f ~/.android/debug.keystore ]; then
-            "$KEYTOOL" -genkeypair \
-              -v \
-              -keystore ~/.android/debug.keystore \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-            echo "Debug keystore created"
-          else
-            echo "Debug keystore already exists"
+          # Same PKCS12 every build → Android can update previous installs.
+          KS_B64=""
+          if [ -f release.keystore.b64 ]; then
+            KS_B64=release.keystore.b64
+          elif [ -f .github/release.keystore.b64 ]; then
+            KS_B64=.github/release.keystore.b64
           fi
-          ls -la ~/.android/debug.keystore
-          # Verify keystore is readable
-          keytool -list -keystore ~/.android/debug.keystore -storepass android | head -20
+          if [ -n "$KS_B64" ]; then
+            base64 -d "$KS_B64" > release.keystore
+            ls -la release.keystore
+            keytool -list -keystore release.keystore -storepass MangaKuRelease2024 -storetype PKCS12 | head -20 || true
+            echo "Stable release keystore ready"
+          else
+            echo "::warning::release.keystore.b64 missing — falling back to debug keystore (updates may fail)"
+            mkdir -p ~/.android
+            if [ ! -f ~/.android/debug.keystore ]; then
+              keytool -genkeypair -v \
+                -keystore ~/.android/debug.keystore \
+                -storepass android -alias androiddebugkey -keypass android \
+                -keyalg RSA -keysize 2048 -validity 10000 \
+                -dname "CN=Android Debug,O=Android,C=US"
+            fi
+          fi
 
       - name: Build release APK
         run: |
@@ -227,6 +231,10 @@ jobs:
           SDK_ESC=$(printf '%s' "$ANDROID_HOME" | sed 's/\\/\\\\/g')
           echo "sdk.dir=${SDK_ESC}" > local.properties
           cat local.properties
+          # Ensure keystore is present for Gradle signingConfigs.release
+          if [ -f release.keystore.b64 ] && [ ! -f release.keystore ]; then
+            base64 -d release.keystore.b64 > release.keystore
+          fi
 
           # Fresh wrapper
           gradle wrapper --gradle-version 8.2 --no-daemon
@@ -345,22 +353,98 @@ jobs:
             find . -name '*.apk' 2>/dev/null || true
             exit 1
           fi
-          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
-            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > /tmp/release.jks
-            SIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort | tail -1)
-            "$SIGNER" sign --ks /tmp/release.jks \
-              --ks-pass "pass:${{ secrets.KEYSTORE_PASSWORD }}" \
-              --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
-              --key-pass "pass:${{ secrets.KEY_PASSWORD }}" \
-              "$APK"
-            echo "Signed with release keystore"
-          else
-            echo "KEYSTORE_BASE64 tidak diset — APK memakai debug signing"
+
+          SIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort | tail -1)
+          if [ -z "$SIGNER" ] || [ ! -x "$SIGNER" ]; then
+            echo "::error::apksigner tidak ditemukan di build-tools"
+            exit 1
           fi
+
+          # Prefer committed stable keystore (same cert every build = updatable APK).
+          # Optional repo secrets override for custom production keys.
+          KS_FILE=""
+          KS_PASS=""
+          KS_ALIAS=""
+          KEY_PASS=""
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > /tmp/release.ks
+            KS_FILE=/tmp/release.ks
+            KS_PASS="${{ secrets.KEYSTORE_PASSWORD }}"
+            KS_ALIAS="${{ secrets.KEY_ALIAS }}"
+            KEY_PASS="${{ secrets.KEY_PASSWORD }}"
+            echo "Using KEYSTORE_BASE64 secret"
+          elif [ -f release.keystore ]; then
+            KS_FILE=release.keystore
+            KS_PASS="MangaKuRelease2024"
+            KS_ALIAS="manga-key"
+            KEY_PASS="MangaKuRelease2024"
+            echo "Using committed stable release.keystore"
+          elif [ -f release.keystore.b64 ]; then
+            base64 -d release.keystore.b64 > /tmp/release.ks
+            KS_FILE=/tmp/release.ks
+            KS_PASS="MangaKuRelease2024"
+            KS_ALIAS="manga-key"
+            KEY_PASS="MangaKuRelease2024"
+            echo "Using release.keystore.b64"
+          fi
+
+          if [ -n "$KS_FILE" ]; then
+            # Re-sign (idempotent) with v1+v2+v3 so install/update works on all API levels.
+            "$SIGNER" sign \
+              --ks "$KS_FILE" \
+              --ks-pass "pass:${KS_PASS}" \
+              --ks-key-alias "$KS_ALIAS" \
+              --key-pass "pass:${KEY_PASS}" \
+              --v1-signing-enabled true \
+              --v2-signing-enabled true \
+              --v3-signing-enabled true \
+              --out /tmp/signed-release.apk \
+              "$APK"
+            mv /tmp/signed-release.apk "$APK"
+            echo "APK signed with stable keystore (alias=${KS_ALIAS})"
+          else
+            echo "::warning::No release keystore — keeping Gradle debug signature (updates may fail)"
+          fi
+
+          # Integrity: APK is a ZIP; reject corrupt/tiny files before release.
+          SIZE=$(stat -c%s "$APK" 2>/dev/null || stat -f%z "$APK")
+          echo "APK size bytes=${SIZE}"
+          if [ "${SIZE}" -lt 50000 ]; then
+            echo "::error::APK terlalu kecil (${SIZE} B) — kemungkinan corrupt"
+            exit 1
+          fi
+          MAGIC=$(head -c 4 "$APK" | od -An -tx1 | tr -d ' \n')
+          echo "APK magic=${MAGIC}"
+          if [ "$MAGIC" != "504b0304" ] && [ "$MAGIC" != "504b0506" ] && [ "$MAGIC" != "504b0708" ]; then
+            echo "::error::APK bukan ZIP valid (magic ${MAGIC}) — file corrupt"
+            exit 1
+          fi
+          # Verify cryptographic signature
+          if ! "$SIGNER" verify --verbose "$APK" 2>&1 | tee /tmp/apk-verify.log; then
+            echo "::error::apksigner verify gagal — APK tidak bisa di-install"
+            cat /tmp/apk-verify.log || true
+            exit 1
+          fi
+          if ! grep -qiE 'Verified using v[123] scheme|verifies' /tmp/apk-verify.log; then
+            echo "::warning::apksigner verify output unexpected — check log"
+            cat /tmp/apk-verify.log || true
+          fi
+          # Ensure AndroidManifest present inside package
+          if command -v unzip >/dev/null 2>&1; then
+            unzip -l "$APK" | head -40
+            unzip -l "$APK" | grep -q 'AndroidManifest.xml' || {
+              echo "::error::AndroidManifest.xml hilang di dalam APK"
+              exit 1
+            }
+          fi
+
           SIGNED_APK="app-${{ github.event.inputs.version_name }}.apk"
           cp "$APK" "$SIGNED_APK"
           ls -la "$SIGNED_APK"
+          # Content-type hint for GitHub release asset consumers
+          file "$SIGNED_APK" || true
           echo "apk_path=$SIGNED_APK" >> "$GITHUB_OUTPUT"
+          echo "apk_size=${SIZE}" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release and upload APK
         uses: softprops/action-gh-release@v2
