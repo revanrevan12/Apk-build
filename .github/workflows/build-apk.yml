@@ -10,11 +10,11 @@ on:
       version_name:
         description: 'Version name (mis. 1.0.0)'
         required: false
-        default: '1.0.55'
+        default: '1.0.56'
       version_code:
         description: 'Version code (angka)'
         required: false
-        default: '56'
+        default: '57'
       website_url:
         description: 'URL website yang dibungkus WebView'
         required: false
@@ -26,7 +26,7 @@ on:
       release_tag:
         description: 'Tag GitHub Release'
         required: false
-        default: 'v1.0.55-manual'
+        default: 'v1.0.56-manual'
 
 permissions:
   contents: write
@@ -81,6 +81,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
