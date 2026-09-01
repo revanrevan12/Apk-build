@@ -6,15 +6,15 @@ on:
       app_name:
         description: 'Nama aplikasi'
         required: false
-        default: 'Komiku'
+        default: 'MangaKu'
       version_name:
         description: 'Version name (mis. 1.0.0)'
         required: false
-        default: '1.0.124'
+        default: '1.0.125'
       version_code:
         description: 'Version code (angka)'
         required: false
-        default: '125'
+        default: '126'
       website_url:
         description: 'URL website yang dibungkus WebView'
         required: false
@@ -26,7 +26,7 @@ on:
       release_tag:
         description: 'Tag GitHub Release'
         required: false
-        default: 'v1.0.124-manual'
+        default: 'v1.0.125-manual'
 
 permissions:
   contents: write
@@ -103,7 +103,7 @@ jobs:
           VERSION_CODE: ${{ github.event.inputs.version_code }}
           WEBSITE_URL: ${{ github.event.inputs.website_url }}
           LOGO_URL: ${{ github.event.inputs.logo_url }}
-          FALLBACK_PACKAGE: 'com.mangareader.app.custom'
+          FALLBACK_PACKAGE: 'com.mangareader.app'
 
       - name: Validate project
         run: |
