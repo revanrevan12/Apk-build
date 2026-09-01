@@ -6,15 +6,15 @@ on:
       app_name:
         description: 'Nama aplikasi'
         required: false
-        default: 'Komiku'
+        default: 'Wurmz'
       version_name:
         description: 'Version name (mis. 1.0.0)'
         required: false
-        default: '1.0.127'
+        default: '1.0.128'
       version_code:
         description: 'Version code (angka)'
         required: false
-        default: '128'
+        default: '129'
       website_url:
         description: 'URL website yang dibungkus WebView'
         required: false
@@ -26,7 +26,7 @@ on:
       release_tag:
         description: 'Tag GitHub Release'
         required: false
-        default: 'v1.0.127-manual'
+        default: 'v1.0.128-manual'
 
 permissions:
   contents: write
